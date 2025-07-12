@@ -16,7 +16,7 @@ logger = logging.getLogger("Bookpiler")
 # Config
 DATA_DIR = './data'
 ASSET_DIR = './asset'
-HEADER_LOGO = os.path.join(ASSET_DIR, 'amarujalalogo.png')
+HEADER_LOGO = "./assets/amarujalalogo.png"
 ALLOWED_EXT = ['.txt', '.pdf']
 
 # --- Helper Functions ---
@@ -66,7 +66,7 @@ def render_text_block(doc, text):
 
 def add_separator(doc):
     para = doc.add_paragraph()
-    run = para.add_run("―" * 60)
+    run = para.add_run("_" * 70)
     para.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
 
 def insert_page_number(paragraph):
@@ -95,13 +95,14 @@ def add_header_footer(section, header_text):
     header_para = section.header.paragraphs[0] if section.header.paragraphs else section.header.add_paragraph()
     header_para.clear()
     run = header_para.add_run()
+
+    header_para.add_run(f"      {header_text}").bold = True
+    header_para.alignment = WD_PARAGRAPH_ALIGNMENT.LEFT
     if os.path.exists(HEADER_LOGO):
         try:
-            run.add_picture(HEADER_LOGO, width=Inches(1), height=Cm(1.2))
+            run.add_picture(HEADER_LOGO, width=Inches(0.8))
         except Exception as e:
             logger.warning(f"Logo insert failed: {e}")
-    header_para.add_run(f"   {header_text}").bold = True
-    header_para.alignment = WD_PARAGRAPH_ALIGNMENT.LEFT
 
     footer_para = section.footer.paragraphs[0] if section.footer.paragraphs else section.footer.add_paragraph()
     footer_para.clear()
@@ -198,7 +199,7 @@ def create_book(book_data):
                     lines = lines[1:]
                 render_text_block(doc, "\n".join(lines))
 
-    output_file = "./Compiled_Book.docx"
+    output_file = f"./generated/Class {class_name} - {subject} - Compiled Book.docx"
     logger.info(f"💾 Saving to: {output_file}")
     doc.save(output_file)
     logger.info("✅ Book compiled successfully.")
