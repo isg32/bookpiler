@@ -6,6 +6,7 @@ from docx.shared import Inches, Pt, Cm
 from docx.enum.text import WD_PARAGRAPH_ALIGNMENT
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
+import unicodedata
 
 # Setup logger
 logging.basicConfig(level=logging.INFO, format='[%(levelname)s] %(message)s')
@@ -28,11 +29,17 @@ def read_file_text(path):
         return "\n".join([page.get_text() for page in doc])
     return ""
 
+def clean_line(line: str) -> str:
+    # Remove all unicode control characters
+    return ''.join(c for c in line if unicodedata.category(c)[0] != 'C').strip()
+
 def extract_chapter_title_from_text(text):
     lines = text.strip().splitlines()
     for line in lines:
-        if line.lower().startswith("chapter"):
-            return line.strip()
+        clean = clean_line(line)
+        print(clean)
+        if clean.lower().startswith("chapter"):
+            return clean
     return "Untitled Chapter"
 
 def render_text_block(doc, text):
@@ -137,8 +144,10 @@ def create_book(book_data):
 
     for folder, chapters in book_data.items():
         class_info_parts = folder.split()
+        print("class_info_parts: ",class_info_parts)
         class_name = class_info_parts[1]
         subject = class_info_parts[2]
+        print("subject: ",subject)
 
         for chapter_key in sorted(chapters):
             chapter_files = chapters[chapter_key]
