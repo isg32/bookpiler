@@ -451,8 +451,8 @@ for (class_num, subject), sorted_pdf_info in compiled_books_map.items():
 
             # Apply headers and footers only if it's NOT the first page (index page)
             if i > 0: # i=0 is the index page
-                header_strip_height = 50
-                footer_strip_height = 60
+                header_strip_height = 46
+                footer_strip_height = 50
 
                 header_rect = fitz.Rect(0, 0, new_page.rect.width, header_strip_height)
                 new_page.draw_rect(header_rect, color=(0.9, 0.9, 0.9), fill=(0.9, 0.9, 0.9))
@@ -462,8 +462,8 @@ for (class_num, subject), sorted_pdf_info in compiled_books_map.items():
 
                 # Header Content
                 current_year = datetime.now().year
-                header_text = f"Class {class_num} - {subject} - {current_year}"
-                text_x = 10
+                header_text = f"Class {class_num}, {subject} - {current_year}"
+                text_x = 30
                 logo_width = 0
 
                 logo_pix = None
@@ -475,8 +475,8 @@ for (class_num, subject), sorted_pdf_info in compiled_books_map.items():
                         logo_pix = None
                 
                 if logo_pix:
-                    logo_display_height = header_strip_height + 1
-                    logo_display_width = (logo_pix.width / logo_pix.height) * logo_display_height
+                    logo_display_height = 60 #header_strip_height + 
+                    logo_display_width = 250 #(logo_pix.width / logo_pix.height) * logo_display_height
                     if logo_display_width > new_page.rect.width / 4:
                         logo_display_width = new_page.rect.width / 4
                         logo_display_height = (logo_pix.height / logo_pix.width) * logo_display_width
@@ -487,10 +487,10 @@ for (class_num, subject), sorted_pdf_info in compiled_books_map.items():
                     logo_pix = None # Release pixmap
 
                 new_page.insert_text(
-                    (text_x + 10, 28),
+                    (text_x + 30, 30),
                     header_text,
                     fontname="Helvetica-Bold",
-                    fontsize=20,
+                    fontsize=15,
                     color=(0, 0, 0)
                 )
 
