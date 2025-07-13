@@ -1,233 +1,178 @@
 import os
 import re
-import logging
+from PyPDF2 import PdfMerger
 import fitz  # PyMuPDF
-import unicodedata
-from docx import Document
-from docx.shared import Inches, Pt
-from docx.enum.text import WD_PARAGRAPH_ALIGNMENT
-from docx.oxml import OxmlElement
-from docx.oxml.ns import qn
 
-# Setup logger
-logging.basicConfig(level=logging.INFO, format='[%(levelname)s] %(message)s')
-logger = logging.getLogger("Bookpiler")
+# --- Configuration ---
+DATA_DIR = "./data"
+TEMP_DIR = "./temp"
+GENERATED_DIR = "./generated"
 
-# Config
-DATA_DIR = './data'
-ASSET_DIR = './assets'
-HEADER_LOGO = os.path.join(ASSET_DIR, 'amarujalalogo.png')
-ALLOWED_EXT = ['.txt', '.pdf']
+# --- Create directories if they don't exist ---
+os.makedirs(TEMP_DIR, exist_ok=True)
+os.makedirs(GENERATED_DIR, exist_ok=True)
 
-# --- Helper Functions ---
-def clean_line(line: str) -> str:
-    return ''.join(c for c in line if unicodedata.category(c)[0] != 'C').strip()
+# --- 1. Parse Files and Pair Them ---
+# Structure: { (class, subject, chapter): {'questions': 'path', 'explanations': 'path'} }
+file_pairs = {}
 
-def read_file_text(path):
-    if path.endswith('.txt'):
-        with open(path, 'r', encoding='utf-8') as f:
-            return f.read()
-    elif path.endswith('.pdf'):
-        doc = fitz.open(path)
-        return "\n".join([page.get_text() for page in doc])
-    return ""
+print("Scanning data directory for PDF files...")
+for root, _, files in os.walk(DATA_DIR):
+    for file_name in files:
+        if file_name.endswith(".pdf"):
+            # This regex allows for optional 'st', 'nd', 'rd', 'th' after the class number
+            match = re.match(r"Class (\d+)(?:st|nd|rd|th)? - (.*?) - (.*?) - (Questions|Explanations)\.pdf", file_name)
+            if match:
+                class_num = match.group(1)
+                subject = match.group(2).strip()
+                chapter_name = match.group(3).strip()
+                file_type = match.group(4).lower()
 
-def extract_chapter_title_from_text(text):
-    lines = text.strip().splitlines()
-    for line in lines:
-        clean = clean_line(line)
-        if clean.lower().startswith("chapter"):
-            return clean
-    return "Untitled Chapter"
-
-def extract_chapter_number(title):
-    match = re.search(r'chapter\s*(\d+)', title.lower())
-    return int(match.group(1)) if match else 9999
-
-def render_text_block(doc, text):
-    lines = text.strip().splitlines()
-    for line in lines:
-        line = clean_line(line)
-        if not line:
-            continue
-        if line.isdigit() and len(line) < 4:
-            logger.debug(f"Skipping probable page number: {line}")
-            continue
-        if line.startswith('[image:') and line.endswith(']'):
-            img_path = line[7:-1].strip()
-            if os.path.exists(img_path):
-                logger.info(f"Adding image: {img_path}")
-                doc.add_picture(img_path, width=Inches(4.5))
+                key = (class_num, subject, chapter_name)
+                if key not in file_pairs:
+                    file_pairs[key] = {}
+                file_pairs[key][file_type] = os.path.join(root, file_name)
             else:
-                logger.warning(f"Image not found: {img_path}")
-        else:
-            doc.add_paragraph(line)
+                print(f"Skipping unrecognized file: {file_name}")
 
-def add_separator(doc):
-    para = doc.add_paragraph()
-    run = para.add_run("_" * 70)
-    para.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
+# --- 2. Merge Pairs into Temporary PDFs and Extract First Line ---
+# Structure: [(sort_key, path_to_merged_pdf, class_num, subject), ...]
+temp_merged_pdfs_info = []
 
-def insert_page_number(paragraph):
-    run = paragraph.add_run()
-    fldChar1 = OxmlElement('w:fldChar')
-    fldChar1.set(qn('w:fldCharType'), 'begin')
+print("\nMerging question/explanation pairs and extracting first lines...")
+for (class_num, subject, chapter_name), paths in file_pairs.items():
+    questions_pdf_path = paths.get('questions')
+    explanations_pdf_path = paths.get('explanations')
 
-    instrText = OxmlElement('w:instrText')
-    instrText.text = 'PAGE'
+    if not questions_pdf_path or not explanations_pdf_path:
+        print(f"Skipping incomplete pair for {class_num} - {subject} - {chapter_name}: Missing {'questions' if not questions_pdf_path else 'explanations'} PDF.")
+        continue
 
-    fldChar2 = OxmlElement('w:fldChar')
-    fldChar2.set(qn('w:fldCharType'), 'separate')
+    output_temp_pdf_name = f"Class {class_num} - {subject} - {chapter_name} - merged.pdf"
+    output_temp_pdf_path = os.path.join(TEMP_DIR, output_temp_pdf_name)
 
-    fldChar3 = OxmlElement('w:fldChar')
-    fldChar3.set(qn('w:fldCharType'), 'end')
+    merger = PdfMerger()
+    try:
+        merger.append(questions_pdf_path)
+        merger.append(explanations_pdf_path)
 
-    run._r.append(fldChar1)
-    run._r.append(instrText)
-    run._r.append(fldChar2)
-    run._r.append(fldChar3)
+        with open(output_temp_pdf_path, "wb") as f:
+            merger.write(f)
+        print(f"  Merged '{os.path.basename(questions_pdf_path)}' and '{os.path.basename(explanations_pdf_path)}' into '{os.path.basename(output_temp_pdf_path)}'")
 
-def add_header_footer(section, header_text):
-    section.header.is_linked_to_previous = False
-    section.footer.is_linked_to_previous = False
-
-    header_para = section.header.paragraphs[0] if section.header.paragraphs else section.header.add_paragraph()
-    header_para.clear()
-    run = header_para.add_run()
-
-    if os.path.exists(HEADER_LOGO):
+        # --- Extract the first line using PyMuPDF ---
+        first_line_content = ""
         try:
-            run.add_picture(HEADER_LOGO, width=Inches(0.8))
+            with fitz.open(output_temp_pdf_path) as doc:
+                if doc.page_count > 0:
+                    page = doc.load_page(0)
+                    text_blocks = page.get_text("blocks")
+                    if text_blocks:
+                        # Sort blocks by their y0 coordinate (top position) to get them in reading order
+                        sorted_blocks = sorted(text_blocks, key=lambda block: block[1])
+                        for block in sorted_blocks:
+                            text = block[4].strip()
+                            if text:
+                                # Take the first non-empty line of the first significant text block
+                                first_line_content = text.split('\n')[0].strip()
+                                break
+            if not first_line_content:
+                print(f"    Warning: Could not extract first line from {os.path.basename(output_temp_pdf_path)}. Using chapter name for sorting.")
+                first_line_content = chapter_name # Fallback
+            else:
+                print(f"    Extracted first line: '{first_line_content}'")
+
         except Exception as e:
-            logger.warning(f"Logo insert failed: {e}")
+            print(f"    Error extracting first line from {os.path.basename(output_temp_pdf_path)}: {e}. Using chapter name for sorting.")
+            first_line_content = chapter_name # Fallback
 
-    header_para.add_run(f"   {header_text}").bold = True
-    header_para.alignment = WD_PARAGRAPH_ALIGNMENT.LEFT
+        temp_merged_pdfs_info.append((first_line_content, output_temp_pdf_path, class_num, subject))
 
-    footer_para = section.footer.paragraphs[0] if section.footer.paragraphs else section.footer.add_paragraph()
-    footer_para.clear()
-    insert_page_number(footer_para)
-    footer_para.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
+    except Exception as e:
+        print(f"  Error merging PDFs for {class_num} - {subject} - {chapter_name}: {e}")
+    finally:
+        merger.close()
 
-# --- Folder Parser ---
-def parse_structure(folders):
-    logger.info("📁 Parsing selected folders...")
-    book = {}
-    for class_folder in folders:
-        class_path = os.path.join(DATA_DIR, class_folder)
-        if not os.path.isdir(class_path):
-            continue
+# --- 3. Group and Sort Merged PDFs for Final Compilation ---
+# Structure: { (class, subject): [(sort_key, path_to_merged_pdf), ...] }
+compiled_books_map = {}
 
-        files = [f for f in os.listdir(class_path) if os.path.splitext(f)[1].lower() in ALLOWED_EXT]
-        for file in files:
-            lower_file = file.lower()
-            full_path = os.path.join(class_path, file)
+for sort_key, pdf_path, class_num, subject in temp_merged_pdfs_info:
+    book_key = (class_num, subject)
+    if book_key not in compiled_books_map:
+        compiled_books_map[book_key] = []
+    compiled_books_map[book_key].append((sort_key, pdf_path))
+
+print("\nSorting merged PDFs for final compilation...")
+for (class_num, subject), pdf_list in compiled_books_map.items():
+    # Define a custom sort function
+    def custom_sort(item):
+        key = item[0] # This is the first line content
+        # Make the key lowercase and remove extra spaces for consistent matching
+        normalized_key = re.sub(r'\s+', ' ', key.lower()).strip()
+
+        # Regex to find chapter number:
+        # - (?:chapter|ch|unit|lesson)\s* could match "chapter", "ch", "unit", "lesson" (case-insensitive)
+        # - (\d+) captures one or more digits (the chapter number)
+        # - (?:[.\s-]+)? allows for optional dot, space, or hyphen after the number (e.g., "Chapter 1." or "Ch 2 -")
+        chapter_match = re.search(r"(?:chapter|ch|unit|lesson)\s*(\d+)(?:[.\s-]+)?", normalized_key)
+        
+        if chapter_match:
             try:
-                parts = file.split(' - ')
-                chapter_key = parts[2].strip()
-            except:
-                logger.warning(f"Skipping malformed filename: {file}")
-                continue
+                chapter_number = int(chapter_match.group(1))
+                return (0, chapter_number) # Sort by chapter number (priority 0)
+            except ValueError:
+                # Fallback if the extracted number isn't a valid integer
+                pass # Continue to the next sorting rule
 
-            if 'explanation' in lower_file:
-                book.setdefault(class_folder, {}).setdefault(chapter_key, {})['explanation'] = full_path
-            elif 'question' in lower_file:
-                book.setdefault(class_folder, {}).setdefault(chapter_key, {})['questions'] = full_path
+        # If no numerical chapter found, sort by normalized string (alphabetical, case-insensitive)
+        return (1, normalized_key) # Sort by name (priority 1), case-insensitive
 
-    return book
 
-# --- Book Generator ---
-def create_book_for_folder(folder_name, chapters_dict):
-    doc = Document()
-    style = doc.styles['Normal']
-    style.font.name = 'Arial'
-    style.font.size = Pt(11)
-    first_section = True
+    pdf_list.sort(key=custom_sort)
+    print(f"  Sorted chapters for Class {class_num} - {subject}")
+    # Optional: Print sorted order for debugging
+    # for s_key, p_path in pdf_list:
+    #     print(f"    - '{s_key}' from {os.path.basename(p_path)}")
 
-    class_info = folder_name.split()
-    class_name = class_info[1]
-    subject = class_info[2]
 
-    sorted_chapters = sorted(
-        chapters_dict.items(),
-        key=lambda item: extract_chapter_number(
-            extract_chapter_title_from_text(read_file_text(item[1].get('questions', '')))
-        )
-    )
+# --- 4. Final Compilation into Book-Compiled.pdf ---
+print("\nCompiling final books...")
+for (class_num, subject), sorted_pdf_info in compiled_books_map.items():
+    final_output_pdf_name = f"Class {class_num} - {subject} - Book-Compiled.pdf"
+    final_output_pdf_path = os.path.join(GENERATED_DIR, final_output_pdf_name)
 
-    for chapter_key, chapter_files in sorted_chapters:
-        explanation_text = read_file_text(chapter_files.get('explanation', ''))
-        questions_text = read_file_text(chapter_files.get('questions', ''))
+    final_merger = PdfMerger()
+    pdfs_to_compile = [item[1] for item in sorted_pdf_info]
 
-        chapter_title = extract_chapter_title_from_text(questions_text or explanation_text or chapter_key)
-        logger.info(f"📝 Writing: {chapter_title}")
+    try:
+        if pdfs_to_compile: # Ensure there are PDFs to merge
+            for pdf_path in pdfs_to_compile:
+                final_merger.append(pdf_path)
 
-        section = doc.sections[0] if first_section else doc.add_section()
-        first_section = False
-
-        header_text = f"Class {class_name}, {subject} - {chapter_title}"
-        add_header_footer(section, header_text)
-
-        doc.add_page_break()
-
-        # Chapter Title
-        para = doc.add_paragraph()
-        run = para.add_run(chapter_title)
-        run.bold = True
-        run.font.size = Pt(24)
-        para.alignment = WD_PARAGRAPH_ALIGNMENT.LEFT
-
-        add_separator(doc)
-
-        if explanation_text:
-            doc.add_heading("Explanations", level=2)
-            lines = explanation_text.strip().splitlines()
-            if lines and "explanation" in clean_line(lines[0]).lower():
-                lines = lines[1:]
-            render_text_block(doc, "\n".join(lines))
-
-        if questions_text:
-            doc.add_heading("Questions", level=2)
-            lines = questions_text.strip().splitlines()
-            if lines and clean_line(lines[0]).lower().startswith("chapter"):
-                lines = lines[1:]
-            render_text_block(doc, "\n".join(lines))
-
-    os.makedirs("generated", exist_ok=True)
-    output_path = f"./generated/{folder_name} - Compiled Book.docx"
-    logger.info(f"💾 Saving to: {output_path}")
-    doc.save(output_path)
-    logger.info("✅ Book compiled successfully for: " + folder_name)
-
-# --- Entry Point ---
-if __name__ == "__main__":
-    logger.info("📘 Bookpiler started")
-
-    all_folders = [f for f in os.listdir(DATA_DIR) if os.path.isdir(os.path.join(DATA_DIR, f))]
-    if not all_folders:
-        logger.error("❌ No class folders found in ./data/")
-        exit(1)
-
-    print("\nFolders found. Choose to process:")
-    print("[ 0 ] All")
-    for idx, name in enumerate(all_folders, 1):
-        print(f"[ {idx} ] {name}")
-
-    choice = input("\nEnter your choice (number): ").strip()
-
-    if not choice.isdigit() or int(choice) < 0 or int(choice) > len(all_folders):
-        logger.error("❌ Invalid choice. Exiting.")
-        exit(1)
-
-    choice = int(choice)
-    selected_folders = all_folders if choice == 0 else [all_folders[choice - 1]]
-
-    for folder in selected_folders:
-        logger.info(f"📚 Processing: {folder}")
-        book_data = parse_structure([folder])
-        if folder in book_data:
-            create_book_for_folder(folder, book_data[folder])
+            with open(final_output_pdf_path, "wb") as f:
+                final_merger.write(f)
+            print(f"  Successfully compiled '{final_output_pdf_path}'")
         else:
-            logger.warning(f"No valid chapters found in {folder}.")
+            print(f"  No PDFs to compile for Class {class_num} - {subject}.")
+    except Exception as e:
+        print(f"  Error compiling final book '{final_output_pdf_path}': {e}")
+    finally:
+        final_merger.close()
 
-    logger.info("📗 Done.")
+# --- Cleanup Temporary Files ---
+print("\nCleaning up temporary files...")
+try:
+    if os.path.exists(TEMP_DIR):
+        for file_name in os.listdir(TEMP_DIR):
+            file_path = os.path.join(TEMP_DIR, file_name)
+            if os.path.isfile(file_path):
+                os.remove(file_path)
+        os.rmdir(TEMP_DIR) # Remove the directory if empty
+        print("Temporary directory and files removed.")
+    else:
+        print("Temporary directory not found, no cleanup needed.")
+except OSError as e:
+    print(f"Error during temporary file cleanup: {e}")
+
+print("\nProcess complete! Check the 'generated' directory for your compiled books.")
