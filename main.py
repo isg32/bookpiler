@@ -1,16 +1,16 @@
 import os
 import re
 from PyPDF2 import PdfMerger
-import fitz  # PyMuPDF
+import fitz # PyMuPDF
 from datetime import datetime
 
 # --- Configuration ---
 DATA_DIR = "./data"
 TEMP_DIR = "./temp"
 GENERATED_DIR = "./generated"
-LOGO_PATH = "./assets/logo.png" # Path to your header logo image
 INDEX_BG_PATH = "./assets/index.png" # Path to your index page background image
 WATERMARK_PATH = "./assets/amjlogo.jpg" # Path to your watermark image
+LOGO_PATH = "./assets/logo.png" # Path to your header logo image
 
 # --- Create directories if they don't exist ---
 os.makedirs(TEMP_DIR, exist_ok=True)
@@ -31,7 +31,6 @@ def generate_index_page(subject, class_num, output_path):
             page = doc.new_page(width=595, height=842) # A4 size default if no image
         else:
             pix = fitz.Pixmap(INDEX_BG_PATH)
-            #page = doc.new_page(width=pix.width, height=pix.height)
             page = doc.new_page(width=595, height=842)
             page.insert_image(page.rect, pixmap=pix)
             pix = None # Release pixmap
@@ -57,19 +56,19 @@ def generate_index_page(subject, class_num, output_path):
         )
 
         # Add Class at the bottom
-        class_text = f"Class {class_num}"
-        class_font_size = 24 # Example size
+        class_text = f"{class_num}"
+        class_font_size = 50 # Example size
         
         # Manually calculate x for centering insert_text as 'align' is not supported
-        text_length = fitz.get_text_length(class_text, fontname="Helvetica-Bold", fontsize=class_font_size)
-        x_centered = (page.rect.width - text_length) / 2
+        text_length = fitz.get_text_length(class_text, fontname="Helvetica", fontsize=class_font_size)
+        x_centered = (page.rect.width - text_length) / 1.55
         
         page.insert_text(
-            (x_centered, page.rect.height - 50), # Position near bottom center
+            (x_centered, page.rect.height - 38), # Position near bottom center
             class_text,
-            fontname="Helvetica-Bold",
+            fontname="Helvetica",
             fontsize=class_font_size,
-            color=(0, 0, 0) # Black color
+            color=(1, 1, 1) # Black color
         )
         
         doc.save(output_path)
@@ -82,10 +81,11 @@ def generate_index_page(subject, class_num, output_path):
 
 
 # --- Function to apply all PDF overlays (Header/Footer/Watermark) ---
-def apply_pdf_overlays(pdf_path, output_pdf_path, class_num, subject):
+def apply_pdf_overlays(pdf_path, output_pdf_path, class_num, subject, is_index_page=False):
     """
     Applies header (logo, class/subject/year), a fully opaque footer with page numbers,
     and a faded watermark to each page of a PDF.
+    The is_index_page flag prevents headers/footers on the index page.
     """
     doc = None
     output_doc = None
@@ -164,75 +164,73 @@ def apply_pdf_overlays(pdf_path, output_pdf_path, class_num, subject):
                 wm_y = (new_page.rect.height - display_height) / 2
                 
                 # Insert the modified pixmap. 'overlay=False' ensures it's behind text.
-                # 'mask' argument might be needed for older versions if alpha channel isn't fully supported
-                # via pixmap directly for transparency, but setting pixel alpha is usually enough.
                 new_page.insert_image(
                     fitz.Rect(wm_x, wm_y, wm_x + display_width, wm_y + display_height),
                     pixmap=watermark_pix,
-                    # 'opacity' keyword argument removed as it's not supported in older versions
                     overlay=False # Still important to draw behind existing content
                 )
 
-
-            # Define strip dimensions
-            header_strip_height = 30 
-            footer_strip_height = 60 # Doubled footer height (original was 30)
-            
-            # Header rectangle (at the top)
-            header_rect = fitz.Rect(0, 0, new_page.rect.width, header_strip_height)
-            new_page.draw_rect(header_rect, color=(0.9, 0.9, 0.9), fill=(0.9, 0.9, 0.9)) # Light grey background
-
-            # Footer rectangle (at the bottom)
-            footer_rect = fitz.Rect(0, new_page.rect.height - footer_strip_height, new_page.rect.width, new_page.rect.height)
-            # Make footer fully opaque (fill color with alpha=1.0)
-            new_page.draw_rect(footer_rect, color=(0.9, 0.9, 0.9), fill=(0.9, 0.9, 0.9), fill_opacity=1.0) 
-
-            # --- Header Content ---
-            header_text = f"Class {class_num} - {subject} - {current_year}"
-            text_x = 10 # Starting X position for text
-            logo_width = 0 # To track logo width for text placement
-
-            if logo_pix:
-                # Scale logo to fit strip height, maintaining aspect ratio
-                logo_display_height = header_strip_height - 10 # Some padding
-                logo_display_width = (logo_pix.width / logo_pix.height) * logo_display_height
+            # --- Apply Header and Footer ONLY if NOT the index page ---
+            if not is_index_page:
+                # Define strip dimensions
+                header_strip_height = 30 
+                footer_strip_height = 60 # Doubled footer height (original was 30)
                 
-                # Ensure logo is not too wide
-                if logo_display_width > new_page.rect.width / 4: # Limit logo width to 1/4 of page
-                    logo_display_width = new_page.rect.width / 4
-                    logo_display_height = (logo_pix.height / logo_pix.width) * logo_display_width
+                # Header rectangle (at the top)
+                header_rect = fitz.Rect(0, 0, new_page.rect.width, header_strip_height)
+                new_page.draw_rect(header_rect, color=(0.9, 0.9, 0.9), fill=(0.9, 0.9, 0.9)) # Light grey background
 
-                logo_rect = fitz.Rect(5, 5, 5 + logo_display_width, 5 + logo_display_height)
-                new_page.insert_image(logo_rect, pixmap=logo_pix)
-                logo_width = logo_rect.width + 10 # Add some padding after logo
-                text_x = logo_width # Start text after logo
+                # Footer rectangle (at the bottom)
+                footer_rect = fitz.Rect(0, new_page.rect.height - footer_strip_height, new_page.rect.width, new_page.rect.height)
+                # Make footer fully opaque (fill color with alpha=1.0)
+                new_page.draw_rect(footer_rect, color=(0.9, 0.9, 0.9), fill=(0.9, 0.9, 0.9), fill_opacity=1.0) 
 
-            new_page.insert_text(
-                (text_x, 20), # Y position within header strip
-                header_text,
-                fontname="Helvetica-Bold",
-                fontsize=10,
-                color=(0, 0, 0) # Black text
-            )
+                # --- Header Content ---
+                header_text = f"Class {class_num} - {subject} - {current_year}"
+                text_x = 10 # Starting X position for text
+                logo_width = 0 # To track logo width for text placement
 
-            # --- Footer Content (Page Numbers) ---
-            # Page numbers will be centered
-            page_number_text = f"Page {i + 1} of {total_pages}"
-            page_number_font_size = 10 # Standard font size for page numbers
-            page_number_color = (0, 0, 0) # Black text
+                if logo_pix:
+                    # Scale logo to fit strip height, maintaining aspect ratio
+                    logo_display_height = header_strip_height - 10 # Some padding
+                    logo_display_width = (logo_pix.width / logo_pix.height) * logo_display_height
+                    
+                    # Ensure logo is not too wide
+                    if logo_display_width > new_page.rect.width / 4: # Limit logo width to 1/4 of page
+                        logo_display_width = new_page.rect.width / 4
+                        logo_display_height = (logo_pix.height / logo_pix.width) * logo_display_width
 
-            # Calculate position for centered text within the footer
-            pn_text_length = fitz.get_text_length(page_number_text, fontname="Helvetica", fontsize=page_number_font_size)
-            pn_x_centered = (new_page.rect.width - pn_text_length) / 2
-            pn_y = new_page.rect.height - (footer_strip_height / 2) + (page_number_font_size / 2) - 3 # Center vertically
+                    logo_rect = fitz.Rect(5, 5, 5 + logo_display_width, 5 + logo_display_height)
+                    new_page.insert_image(logo_rect, pixmap=logo_pix)
+                    logo_width = logo_rect.width + 10 # Add some padding after logo
+                    text_x = logo_width # Start text after logo
 
-            new_page.insert_text(
-                (pn_x_centered, pn_y),
-                page_number_text,
-                fontname="Helvetica", # Using standard Helvetica for page numbers
-                fontsize=page_number_font_size,
-                color=page_number_color
-            )
+                new_page.insert_text(
+                    (text_x, 20), # Y position within header strip
+                    header_text,
+                    fontname="Helvetica-Bold",
+                    fontsize=10,
+                    color=(0, 0, 0) # Black text
+                )
+
+                # --- Footer Content (Page Numbers) ---
+                # Page numbers will be centered
+                page_number_text = f"Page {i + 1} of {total_pages}"
+                page_number_font_size = 10 # Standard font size for page numbers
+                page_number_color = (0, 0, 0) # Black text
+
+                # Calculate position for centered text within the footer
+                pn_text_length = fitz.get_text_length(page_number_text, fontname="Helvetica", fontsize=page_number_font_size)
+                pn_x_centered = (new_page.rect.width - pn_text_length) / 2
+                pn_y = new_page.rect.height - (footer_strip_height / 2) + (page_number_font_size / 2) - 3 # Center vertically
+
+                new_page.insert_text(
+                    (pn_x_centered, pn_y),
+                    page_number_text,
+                    fontname="Helvetica", # Using standard Helvetica for page numbers
+                    fontsize=page_number_font_size,
+                    color=page_number_color
+                )
 
         output_doc.save(output_pdf_path)
         print(f"  Successfully applied overlays (watermark, header strip, fully opaque footer with page numbers) to '{os.path.basename(pdf_path)}' and saved to '{os.path.basename(output_pdf_path)}'.")
@@ -376,38 +374,155 @@ for (class_num, subject), sorted_pdf_info in compiled_books_map.items():
     final_output_pdf_path_initial_merge = os.path.join(TEMP_DIR, f"temp_initial_merged_{class_num}_{subject}.pdf") # Temp path before overlays
     final_output_pdf_path_final = os.path.join(GENERATED_DIR, final_output_pdf_name) # Final path
 
-    final_merger = PdfMerger()
+    # Create a temporary merger for the index page and content *without* overlays
+    merger_without_overlays = PdfMerger()
     
     # 1. Add Index Page
     index_page_path = os.path.join(TEMP_DIR, f"index_page_{class_num}_{subject}.pdf")
     generate_index_page(subject, class_num, index_page_path)
     if os.path.exists(index_page_path):
-        final_merger.append(index_page_path)
+        merger_without_overlays.append(index_page_path)
 
     # 2. Add main content PDFs
     pdfs_to_compile = [item[1] for item in sorted_pdf_info]
     try:
         if not pdfs_to_compile:
             print(f"  No content PDFs to compile for Class {class_num} - {subject}. Skipping book creation.")
+            merger_without_overlays.close() # Close merger if nothing to compile
             continue
 
         for pdf_path in pdfs_to_compile:
-            final_merger.append(pdf_path)
+            merger_without_overlays.append(pdf_path)
 
         # Save the initially merged PDF (with index, content) to a temp file
         with open(final_output_pdf_path_initial_merge, "wb") as f:
-            final_merger.write(f)
+            merger_without_overlays.write(f)
         print(f"  Initial merge complete for '{os.path.basename(final_output_pdf_name)}'.")
 
-        # Now, apply all overlays (watermark, header/footer) to this initially merged PDF
-        apply_pdf_overlays(final_output_pdf_path_initial_merge, final_output_pdf_path_final, class_num, subject)
+        # Now, open the initially merged PDF and apply overlays selectively
+        doc_with_index = fitz.open(final_output_pdf_path_initial_merge)
+        final_doc_with_overlays = fitz.open()
+
+        for i, page in enumerate(doc_with_index):
+            new_page = final_doc_with_overlays.new_page(width=page.rect.width, height=page.rect.height)
+            new_page.show_pdf_page(page.rect, doc_with_index, page.number, overlay=False)
+
+            # Apply watermark to all pages
+            # Load watermark image (re-load if needed, or pass it from outside loop)
+            watermark_pix = None
+            if os.path.exists(WATERMARK_PATH):
+                try:
+                    watermark_pix_orig = fitz.Pixmap(WATERMARK_PATH)
+                    if watermark_pix_orig.n < 4:
+                        watermark_pix = fitz.Pixmap(fitz.csRGBA, watermark_pix_orig)
+                    else:
+                        watermark_pix = fitz.Pixmap(watermark_pix_orig)
+                    desired_alpha = 0.15
+                    for row in range(watermark_pix.height):
+                        for col in range(watermark_pix.width):
+                            r, g, b, a = watermark_pix.pixel(col, row)
+                            watermark_pix.set_pixel(col, row, (r, g, b, int(a * desired_alpha)))
+                    watermark_pix_orig = None
+                except Exception as e:
+                    print(f"  Warning: Could not load or process watermark image for individual page: {e}")
+                    watermark_pix = None
+            
+            if watermark_pix:
+                wm_aspect = watermark_pix.width / watermark_pix.height
+                page_aspect = new_page.rect.width / new_page.rect.height
+
+                if wm_aspect > page_aspect:
+                    display_width = new_page.rect.width
+                    display_height = display_width / wm_aspect
+                else:
+                    display_height = new_page.rect.height
+                    display_width = display_height * wm_aspect
+                
+                wm_x = (new_page.rect.width - display_width) / 2
+                wm_y = (new_page.rect.height - display_height) / 2
+                
+                new_page.insert_image(
+                    fitz.Rect(wm_x, wm_y, wm_x + display_width, wm_y + display_height),
+                    pixmap=watermark_pix,
+                    overlay=False
+                )
+                watermark_pix = None # Release pixmap after use for each page
+
+
+            # Apply headers and footers only if it's NOT the first page (index page)
+            if i > 0: # i=0 is the index page
+                header_strip_height = 50
+                footer_strip_height = 60
+
+                header_rect = fitz.Rect(0, 0, new_page.rect.width, header_strip_height)
+                new_page.draw_rect(header_rect, color=(0.9, 0.9, 0.9), fill=(0.9, 0.9, 0.9))
+
+                footer_rect = fitz.Rect(0, new_page.rect.height - footer_strip_height, new_page.rect.width, new_page.rect.height)
+                new_page.draw_rect(footer_rect, color=(0.9, 0.9, 0.9), fill=(0.9, 0.9, 0.9), fill_opacity=1.0)
+
+                # Header Content
+                current_year = datetime.now().year
+                header_text = f"Class {class_num} - {subject} - {current_year}"
+                text_x = 10
+                logo_width = 0
+
+                logo_pix = None
+                if os.path.exists(LOGO_PATH):
+                    try:
+                        logo_pix = fitz.Pixmap(LOGO_PATH)
+                    except Exception as e:
+                        print(f"  Warning: Could not load header logo image for individual page: {e}")
+                        logo_pix = None
+                
+                if logo_pix:
+                    logo_display_height = header_strip_height + 1
+                    logo_display_width = (logo_pix.width / logo_pix.height) * logo_display_height
+                    if logo_display_width > new_page.rect.width / 4:
+                        logo_display_width = new_page.rect.width / 4
+                        logo_display_height = (logo_pix.height / logo_pix.width) * logo_display_width
+                    logo_rect = fitz.Rect(0, 0, 0 + logo_display_width, 0 + logo_display_height)
+                    new_page.insert_image(logo_rect, pixmap=logo_pix)
+                    logo_width = logo_rect.width + 10
+                    text_x = logo_width
+                    logo_pix = None # Release pixmap
+
+                new_page.insert_text(
+                    (text_x + 10, 28),
+                    header_text,
+                    fontname="Helvetica-Bold",
+                    fontsize=20,
+                    color=(0, 0, 0)
+                )
+
+                # Footer Content (Page Numbers)
+                page_number_text = f"Page {i + 1} of {doc_with_index.page_count}" # Adjust total pages
+                page_number_font_size = 10
+                page_number_color = (0, 0, 0)
+
+                pn_text_length = fitz.get_text_length(page_number_text, fontname="Helvetica", fontsize=page_number_font_size)
+                pn_x_centered = (new_page.rect.width - pn_text_length) / 2
+                pn_y = new_page.rect.height - (footer_strip_height / 2) + (page_number_font_size / 2) - 3
+
+                new_page.insert_text(
+                    (pn_x_centered, pn_y),
+                    page_number_text,
+                    fontname="Helvetica",
+                    fontsize=page_number_font_size,
+                    color=page_number_color
+                )
         
-        print(f"  Successfully compiled final book '{final_output_pdf_path_final}' with index, content, and all overlays.")
+        final_doc_with_overlays.save(final_output_pdf_path_final)
+        print(f"  Successfully compiled final book '{final_output_pdf_path_final}' with index and selective overlays.")
 
     except Exception as e:
         print(f"  Error processing book '{final_output_pdf_name}': {e}")
     finally:
-        final_merger.close() # Ensure PdfMerger is closed
+        merger_without_overlays.close()
+        if doc_with_index:
+            doc_with_index.close()
+        if final_doc_with_overlays:
+            final_doc_with_overlays.close()
+
 
 # --- Cleanup Temporary Files ---
 print("\nCleaning up temporary files...")
